@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Desafío Completar ABC/123</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #0f172a; overflow: hidden; touch-action: none; font-family: 'Inter', sans-serif; }
+        canvas { 
+            border: 6px solid #334155; 
+            border-radius: 12px; 
+            background: #1e293b;
+        }
+        .char-tag {
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 35px;
+            height: 35px;
+            border-radius: 8px;
+            font-weight: bold;
+            margin: 2px;
+            background: #334155;
+            color: #94a3b8;
+        }
+        .char-done {
+            background: #22c55e !important;
+            color: white !important;
+            transform: scale(1.1);
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4 text-white">
+
+    <div class="mb-4 text-center">
+        <h1 class="text-2xl font-black text-blue-400">¡COMPLETÁ LA COLECCIÓN!</h1>
+        <p id="missionStatus" class="text-slate-400">Juntá 3 iguales para tacharlas de la lista</p>
+    </div>
+
+    <div class="flex flex-col lg:flex-row gap-8 items-start max-w-6xl">
+        <div class="stats-card p-6 rounded-2xl bg-slate-800/50 border border-slate-700 w-full lg:w-80 order-2 lg:order-1">
+            <h2 class="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">Tu Progreso</h2>
+            <div id="charList" class="flex flex-wrap justify-center">
+                </div>
+        </div>
+
+        <div class="relative order-1 lg:order-2">
+            <canvas id="gameCanvas" width="300" height="500"></canvas>
+        </div>
+
+        <div class="flex flex-col gap-4 w-full lg:w-48 order-3">
+            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center">
+                <p class="text-xs text-slate-500 uppercase">Puntos</p>
+                <p id="score" class="text-3xl font-mono font-bold text-yellow-400">0</p>
+            </div>
+            <button id="modeLetters" class="bg-blue-600 p-3 rounded-lg font-bold text-sm">MODO ABC</button>
+            <button id="modeNumbers" class="bg-emerald-600 p-3 rounded-lg font-bold text-sm">MODO 123</button>
+            <div class="text-[10px] text-slate-500 mt-4 p-2 bg-slate-900/50 rounded">
+                <p>⬅️ ➡️ Mover</p>
+                <p>⬇️ Bajar</p>
+                <p>⎵ Espacio: CAÍDA RÁPIDA</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const charListEl = document.getElementById('charList');
+        
+        const COLS = 6;
+        const ROWS = 10;
+        const SIZE = 50;
+
+        function decir(texto) {
+            window.speechSynthesis.cancel();
+            const msg = new SpeechSynthesisUtterance(texto);
+            msg.lang = 'es-AR';
+            msg.rate = 1;
+            window.speechSynthesis.speak(msg);
+        }
+
+        class Game {
+            constructor() {
+                this.grid = Array(ROWS).fill().map(() => Array(COLS).fill(null));
+                this.score = 0;
+                this.mode = 'letters'; 
+                this.availableChars = [];
+                this.completedChars = new Set();
+                this.gameOver = false;
+                this.player = { x: 3, y: 0, char: '', color: '' };
+                this.dropInterval = 1000;
+                this.lastTime = 0;
+                this.dropCounter = 0;
+                
+                this.init();
+            }
+
+            init() {
+                this.setupMode();
+                this.resetPlayer();
+                this.setupEvents();
+                this.update();
+            }
+
+            setupMode() {
+                const chars = this.mode === 'letters' ? 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZ' : '0123456789';
+                this.availableChars = chars.split('');
+                this.completedChars.clear();
+                this.renderList();
+                decir(this.mode === 'letters' ? "¡A completar el abecedario!" : "¡A juntar los números del cero al nueve!");
+            }
+
+            renderList() {
+                charListEl.innerHTML = '';
+                const allChars = this.mode === 'letters' ? 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZ' : '0123456789';
+                allChars.split('').forEach(c => {
+                    const span = document.createElement('span');
+                    span.textContent = c;
+                    span.id = `char-${c}`;
+                    span.className = 'char-tag';
+                    if (this.completedChars.has(c)) span.classList.add('char-done');
+                    charListEl.appendChild(span);
+                });
+            }
+
+            resetPlayer() {
+                // Filtrar caracteres que aún NO han sido completados
+                const remaining = this.availableChars.filter(c => !this.completedChars.has(c));
+                
+                if (remaining.length === 0) {
+                    this.win();
+                    return;
+                }
+
+                this.player.char = remaining[Math.floor(Math.random() * remaining.length)];
+                this.player.x = Math.floor(COLS / 2);
+                this.player.y = 0;
+                this.player.color = `hsl(${Math.random() * 360}, 60%, 50%)`;
+                
+                if (this.grid[0][this.player.x]) {
+                    this.grid = Array(ROWS).fill().map(() => Array(COLS).fill(null));
+                    decir("¡Cuidado! Se llenó el tablero, pero seguimos intentando.");
+                }
+            }
+
+            win() {
+                this.gameOver = true;
+                decir("¡Felicitaciones! Completaste toda la lista. ¡Sos un genio!");
+                document.getElementById('missionStatus').textContent = "¡MISIÓN CUMPLIDA! 🎉";
+            }
+
+            drawBlock(x, y, char, color) {
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.roundRect(x * SIZE + 2, y * SIZE + 2, SIZE - 4, SIZE - 4, 10);
+                ctx.fill();
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 24px Inter';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(char, x * SIZE + SIZE/2, y * SIZE + SIZE/2);
+            }
+
+            lock() {
+                this.grid[this.player.y][this.player.x] = { char: this.player.char, color: this.player.color };
+                decir(this.player.char);
+                this.checkMatches();
+                if (!this.gameOver) this.resetPlayer();
+            }
+
+            checkMatches() {
+                let toRemove = new Set();
+                const dirs = [[1,0], [0,1], [1,1], [1,-1]];
+
+                for (let y = 0; y < ROWS; y++) {
+                    for (let x = 0; x < COLS; x++) {
+                        const cell = this.grid[y][x];
+                        if (!cell) continue;
+
+                        dirs.forEach(([dx, dy]) => {
+                            let match = [[x, y]];
+                            for (let i = 1; i < 5; i++) {
+                                let nx = x + dx * i, ny = y + dy * i;
+                                if (nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS && 
+                                    this.grid[ny][nx] && this.grid[ny][nx].char === cell.char) {
+                                    match.push([nx, ny]);
+                                } else break;
+                            }
+                            if (match.length >= 3) match.forEach(p => toRemove.add(p.join(',')));
+                        });
+                    }
+                }
+
+                if (toRemove.size > 0) {
+                    const firstCoord = [...toRemove][0].split(',');
+                    const charMatched = this.grid[firstCoord[1]][firstCoord[0]].char;
+                    
+                    if (!this.completedChars.has(charMatched)) {
+                        this.completedChars.add(charMatched);
+                        decir("¡Muy bien! Tachamos la " + charMatched);
+                        document.getElementById(`char-${charMatched}`).classList.add('char-done');
+                    }
+
+                    toRemove.forEach(pos => {
+                        const [x, y] = pos.split(',').map(Number);
+                        this.grid[y][x] = null;
+                        this.score += 10;
+                    });
+                    this.applyGravity();
+                    scoreEl.textContent = this.score;
+                }
+            }
+
+            applyGravity() {
+                for (let x = 0; x < COLS; x++) {
+                    for (let y = ROWS - 1; y > 0; y--) {
+                        if (!this.grid[y][x]) {
+                            for (let ny = y - 1; ny >= 0; ny--) {
+                                if (this.grid[ny][x]) {
+                                    this.grid[y][x] = this.grid[ny][x];
+                                    this.grid[ny][x] = null;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            update(time = 0) {
+                const dt = time - this.lastTime;
+                this.lastTime = time;
+                this.dropCounter += dt;
+                if (this.dropCounter > this.dropInterval) {
+                    if (this.player.y + 1 < ROWS && !this.grid[this.player.y+1][this.player.x]) {
+                        this.player.y++;
+                    } else { this.lock(); }
+                    this.dropCounter = 0;
+                }
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                this.grid.forEach((row, y) => row.forEach((c, x) => c && this.drawBlock(x, y, c.char, c.color)));
+                if (!this.gameOver) this.drawBlock(this.player.x, this.player.y, this.player.char, this.player.color);
+                requestAnimationFrame(t => this.update(t));
+            }
+
+            setupEvents() {
+                window.onkeydown = e => {
+                    if (this.gameOver) return;
+                    if (["ArrowLeft", "ArrowRight", "ArrowDown", " "].includes(e.key)) e.preventDefault();
+                    if (e.key === 'ArrowLeft' && this.player.x > 0 && !this.grid[this.player.y][this.player.x-1]) this.player.x--;
+                    if (e.key === 'ArrowRight' && this.player.x < COLS-1 && !this.grid[this.player.y][this.player.x+1]) this.player.x++;
+                    if (e.key === 'ArrowDown') this.dropCounter = this.dropInterval;
+                    if (e.key === ' ') { 
+                        while(this.player.y + 1 < ROWS && !this.grid[this.player.y+1][this.player.x]) this.player.y++;
+                        this.lock();
+                    }
+                };
+                document.getElementById('modeLetters').onclick = () => { this.mode = 'letters'; this.gameOver=false; this.grid = Array(ROWS).fill().map(() => Array(COLS).fill(null)); this.setupMode(); this.resetPlayer(); };
+                document.getElementById('modeNumbers').onclick = () => { this.mode = 'numbers'; this.gameOver=false; this.grid = Array(ROWS).fill().map(() => Array(COLS).fill(null)); this.setupMode(); this.resetPlayer(); };
+            }
+        }
+        new Game();
+    </script>
+</body>
+</html>
